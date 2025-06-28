@@ -1,0 +1,130 @@
+ T88 szalagképfájl formátum Ver. 1.0
+1998-08-22 by Manuke
+Leírás
+
+*** A szövegben szereplő szabályok
+
+・A formátum leírásában a [] jelöléssel körülvett részek elhagyhatók.
+・A T88-ban szereplő számok mind kis végű (alacsonyabb bájt → magasabb bájt sorrendben) formában vannak kifejezve.
+・A T88-ban 1/4800 másodperc az időegység. A szövegben ezt az egységet 1 tick-nek nevezzük.
+*** Áttekintés
+
+A T88 egy tag formátumú, változó hosszúságú fájlformátum.
+A fájl fejlécével kezdődik, amelyet több tag követ.
+
+Fájl fejléc, tag 1[, tag 2[, tag 3...]]
+*** Fájl fejléc
+
+ A fájlfejléc egy 23+1 bájtos karakterlánc, amely jelzi, hogy a fájl T88 formátumú.
+(23 bájtos karakterlánc + 00H végjel)
+
+„PC-8801 Tape Image(T88)”
+*** Címke
+
+A címke változó hosszúságú adatstruktúra.
+A címke mindig tartalmazza a típus és az adat hossza információt.
+
+ID (2 bájtos egész szám), adat hossza (2 bájtos egész szám) [, adat (megadott hosszúság)]
+
+* (Az adat hossza nem tartalmazza az ID-t és az adat hossza saját hosszát.)
+
+A címke formátum olyan adatformátum, amely könnyen biztosítja az alsóbb szintű kompatibilitást, ha a fájl szerkezete megváltozik.
+Ennek megvalósításához a T88 fájlokat feldolgozó programoknak be kell építeniük egy olyan funkciót, amely az ismeretlen ID-vel rendelkező címkéket kihagyja.
+
+Záró címke (ID: 0000H, adat hossza: 0 bájt)
+    A fájl végét jelző címke. Minden T88 fájl végén szerepel.
+    A záró címke nem tartalmaz kísérő adatokat.
+    Példa: 00 00 00 00
+
+
+Verzió címke (ID:0001H, adat hossza: 2 bájt)
+    A T88 fájl verzióját jelző címke.
+    A verzió címke a következő adatokat tartalmazza.
+        Verziószám (2 bájtos egész szám) : A felső bájt a fő verziót, az alsó bájt a mellék verziót jelzi. A jelenlegi verzió 0100H.
+    Példa: 01 00 02 00 00 01
+
+Üres címke (ID: 0100H, adat hossza: 8 bájt)
+Szóköz címke (ID: 0102H, adat hossza: 8 bájt)
+Jelölő címke (ID: 0103H, adat hossza: 8 bájt)
+    Ez a címke a szalagon lévő adatok nélküli területeket jelöli.
+    Az üres címke a hordozót nem érzékelő területet jelöli.
+    A szóköz címke a 1200 Hz-es hordozót (0-t jelöl) érzékelő területet jelöli.
+    A jelölő címke a 2400 Hz-es hordozót (1-et jelöl) érzékelő területet jelöli.
+    Ezek a címkék mindegyike a következő adatokat tartalmazza.
+        Terület kezdete (4 bájt egész szám), terület hossza (4 bájt egész szám)
+        A terület kezdési ideje és hossza tick egységben van megadva.
+    Példa: ( A terület kezdési ideje 3 másodperc ( 14400 tick ), a terület hossza 2 másodperc ( 9600 tick ) )
+        <Üres címke>   00 01 08 00 40 38 00 00 80 25 00 00
+        <Szóköz címke> 02 01 08 00 40 38 00 00 80 25 00 00
+        <Jelölő címke> 03 01 08 00 40 38 00 00 80 25 00 00
+
+Adatcímke (ID:0101H, adat hossza: 12 bájt + tényleges adatbájtok száma)
+    A szalagon rögzített tényleges adatok területét jelölő címke.
+    Az adatcímke a következő információk mellett a tényleges adatok bájtsorozatát is tartalmazza.
+
+    Terület kezdete (4 bájtos egész szám), terület hossza (4 bájtos egész szám),
+    tényleges adatbájtok száma (2 bájtos egész szám), tényleges adattípus (2 bájt egész szám)
+
+    A terület kezdőideje és hossza tick egységben van megadva.
+    A terület hossza általában megegyezik az alábbi értékekkel.
+
+    1200 baud: tényleges adatbájtok száma × 44
+    600 baud: tényleges adatbájtok száma × 88
+
+    A tényleges adatbájtok száma mindig 32768 vagy annál kisebb érték.
+    Ha 32768-nál több adatot tartalmazó címkét szeretne létrehozni, azt több egymást követő adatcímkére kell felosztania.
+
+    A tényleges adattípus a következő információkat jelzi.
+        * Általában 00CCH (600 baud) vagy 01CCH (1200 baud) értéket vesz fel.
+        (A 2–7. bitek jelentése megegyezik a 8251USART mód utasításával.)
+
+        15 	14 	13 	12 	11 	10 	9 	8 	7 	6 	5 	4 	3 	2 	1 	0
+        x 	x 	x 	x 	x 	x 	x 	BD 	S2 	S1 	EP 	PEN 	L2 	L1 	x 	x
+                x     : Meghatározatlan (létrehozáskor 0-t kell beírni)
+                L1,L2     : Adatbit hossza
+                PEN     : Paritás engedélyezése
+                EP     : Paritás megadása
+                S1,S2     : Stopbit hossza
+                BD     : Baudráta (0:600 baud, 1:1200 baud)
+    Példa: (terület kezdete 5 másodperc (24000 tick), tényleges adat „ABCDEF”, 1200 baud)
+        01 01 12 00 C0 5D 00 00 08 01 00 00 06 00 CC 01 41 42 43 44 45 46
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+Példa
+    Az itt bemutatott dump lista a következő program 1200 baud sebességgel történő mentése esetén keletkezik.
+
+10 PRINT „HELLO”
+(SAVE „HELLO” parancs mentése)
+
+0000 	50 43 2D 38 38 30 31 20 54 61 70 65 20 49 6D 61 	PC-8801 Tape Ima
+0010 	67 65 28 54 38 38 29 00|01 00 02 00 00 01|02 01 	ge(T88).........
+0020 	08 00 00 00 00 00 F8 1E 00 00|03 01 08 00 F8 1E 	................
+0030 	00 00 28 05 00 00|01 01 1C 00 20 24 00 00 C0 02 	..(....... $....
+0040 	00 00 10 00 CC 01|D3 D3 D3 D3 D3 D3 D3 D3 D3 D3 	................
+0050 	48 45 4C 4C 4F 00|03 01 08 00 E0 26 00 00 5C 02 	HELLO......&..\.
+0060 	00 00|01 01 25 00 3C 29 00 00 4C 04 00 00 19 00 	....%.<)..L.....
+0070 	CC 01|0F 00 0A 00 91 20 22 48 45 4C 4C 4F 22 00 	....... "HELLO".
+0080 	00 00 00 00 00 00 00 00 00 00 00|03 01 08 00 88 	................
+0090 	2D 00 00 7C 0F 00 00|02 01 08 00 04 3D 00 00 20 	-..|........=..
+00A0 	24 00 00|00 00 00 00 	$......
+
+0000-0017 : Fájlfejléc
+0018-001D : Verzió címke
+001E-0029 : Szóköz címke
+0030-0035 : Jelölő címke
+0036-0045 : Adat címke
+0046-0055 : Adat címke belsejében található tényleges adatok
+0056-0061 : Jelölő címke
+0062-0071 : Adat címke
+0072-008A : Adat címke belsejében található tényleges adatok
+008B-0096 : Jelölő címke
+0097-00A2 : Szóköz címke
+00A3-00A6 : Záró címke
+
+■ : Fájlfejléc
+■ : Verzió címke
+■ : Szóköz címke
+■ : Jelölő címke
+■ : Adat címke
+■ : Adat címke belsejében található tényleges adatok
+■ : Záró címke

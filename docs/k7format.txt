@@ -1,0 +1,19 @@
+00-09 - File type
+10-16 - File name                          (ASCII)
+17    - Version                            00
+18-22 - Start line number                  (ASCII)
+23    - Protection byte                    00=protected
+24-25 - Position to calc sumschek on input 00,00
+26-27 - Start address                      hex
+28-29 - Data length
+30-31 - Sumcheck
+
+FileType: 0xD3 = CLOAD
+
+D3 D3 D3 D3 D3 D3 D3 D3 D3 D3 
+4D 56 47 35 30 30 30 
+00 
+31 30 00 00 00 00 00 00 
+FC 49 
+40 1F 
+29 1B 

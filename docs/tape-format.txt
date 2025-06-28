@@ -1,0 +1,56 @@
+1200Hz / 2400Hz
+FSK
+
+From https://gitlab.com/retroabandon/pc8001-re :
+
+Tape Format
+
+The PC-8001 tape format detailed in MZ→PC 変更プログラム
+(I/O Magazine, 1980-10), including Sharp MZ code to write PC-8001
+-format tapes.
+
+Space bit is two cycles of 1200 Hz; mark bit is four cycles of 2400 Hz.
+Header block: 3A AA aa cc load address upper/lower, checksum.
+Data block: 3A ll dd ... dd ck data length, data, checksum.
+End block: 3A 00 00.
+
+0 : 4x8 hosszú félperiódus, azaz 2 teljes 8 lent, 8 fent minta. 1200Hz
+1 : 8x4 hosszú félperiódus, azaz 4 teljes 4 lent, 4 fent minta. 2400Hz
+
+Header:
+    - 3A
+    - Load address High
+    - Load ddress Low
+    - Cheksum
+
+Data:
+    - 3A
+    - length 1 byte
+    - data
+    ...
+    - data
+    - checksum
+End:
+    - 3A
+    - 0
+    - 0
+
+19200Hz: S:2x4 és L:2x8 minta
+48000Hz: S:2x10 és L:2x20 minta
+
+Leading:
+    S S S S ... S
+    1 1 1 1 ... 1
+
+Data:
+    L4  S4 L2 S12   L4  S8  L2 S4 L10       S16     L18               S8  L2 S24         L4  S8  L4  S4 L2 ...
+    0 0 1  0  1 1 1 0 0 1 1 0  1  0 0 0 0 0 1 1 1 1 0 0 0 0 0 0 0 0 0 1 1 0  1 1 1 1 1 1 0 0 1 1 0 0 1  0
+
+Byte format:
+    0 b0 b1 b2 b3 b4 b5 b6 b7 1 1
+
+
+3A 00111010
+
+Bit 0: L2
+Bit 1: S4
