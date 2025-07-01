@@ -1,5 +1,5 @@
 /***************************************************
- * cmt2wav, 2025.04. Princz László
+ * cmt2wav, 2025.06. Princz László
  * Convert CMT or CMT containde T88 files to Nec PC-8001 wav file
  * Nec PC-8001 tape dataformat / CMT fileformat:
  *  BASIC file:
@@ -49,7 +49,7 @@
 #include "math.h"
 
 #define VM 0
-#define VS 1
+#define VS 2
 #define VB 'b'
 
 #define WAV_SAMPLE_RATE 44100
@@ -191,6 +191,7 @@ uint32_t tick_pos = 0;
 // Mark block 2400Hz: egy félhullám hossza 1 tick
 
 uint16_t t88_close_block( FILE *fin, FILE *fout, uint16_t block_data_length, const char* name ) {
+    // fprintf( stdout, "*** Close block\n" );
     // fprintf( stdout, "\t%s block\n", name );
     if ( block_data_length ) {
         fprintf( stderr, "Hibás záróblokk, hossza nem 0, hanem: 0x%04X\n", block_data_length );
@@ -306,8 +307,7 @@ void convert( FILE *fin, FILE *fout ) { // return sample counter
     write_leading( fout, 1024 );
     if ( t88_mode ) {
         if ( check_string0( fin, "PC-8801 Tape Image(T88)" ) ) { // Ok, T88
-            while( copy_block( fin, fout ) ) {
-            }
+            while( ftell( fin ) < data_size_0 ) copy_block( fin, fout );
         } else {
             fprintf( stderr, "Nem T88 fájl\n" );
             exit( 1 );
