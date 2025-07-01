@@ -41,13 +41,6 @@
 #include <string.h>
 #include <ctype.h>
 
-/* helyettesítő itoa */
-void itoa(int value, char *str, int base) {
-    sprintf(str, (base == 8) ? "%o" :
-                  (base == 10) ? "%d" :
-                  (base == 16) ? "%x" : "%d", value);
-}
-
 /* helyettesítő stricmp */
 int stricmp(const char *s1, const char *s2) {
     while (*s1 && *s2) {
@@ -317,7 +310,6 @@ int main(int argc, char* argv[]) {
 				int vh = fgetc(fp);
 				int val = (vl & 0xff) + ((vh & 0xff) << 8);
 				char buf[16];
-				// itoa( val, buf, 8 );
 				snprintf( buf, sizeof(buf), "%o", val );
 				printf("&O%s",(char*)buf);
 			} else if( ch == 0x0c ) {	// hexa constant
@@ -325,7 +317,6 @@ int main(int argc, char* argv[]) {
 				int vh = fgetc(fp);
 				int val = (vl & 0xff) + ((vh & 0xff) << 8);
 				char buf[16];
-				// itoa( val, buf, 16 );
 				snprintf( buf, sizeof(buf), "%x", val );
 				printf("&H%s",(char*)buf);
 			} else if( ch == 0x0d ) {	// absolute address replaced from line number

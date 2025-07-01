@@ -49,13 +49,6 @@
 
 bool verbose = false;
 
-/* helyettesítő itoa */
-void itoa(int value, char *str, int base) {
-    sprintf(str, (base == 8) ? "%o" :
-                  (base == 10) ? "%d" :
-                  (base == 16) ? "%x" : "%d", value);
-}
-
 /* helyettesítő stricmp */
 int stricmp(const char *s1, const char *s2) {
     while (*s1 && *s2) {
