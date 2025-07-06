@@ -48,6 +48,9 @@
 #define VB 'b'
 
 bool verbose = false;
+bool debug = false;
+bool autoLineNumberIfNotExist = false;
+bool show_extra_spaces = false;
 
 /* helyettesítő stricmp */
 int stricmp(const char *s1, const char *s2) {
@@ -156,7 +159,7 @@ unsigned char * keywordsBase[126] = {
 	"LFILES",
 	"INIT",
 	"LOCATE",
-	"'",
+	"???,???",            // 0xD6
 	"TO",
 	"THEN",        // LN
 	"TAB(",
@@ -171,7 +174,7 @@ unsigned char * keywordsBase[126] = {
 	"STRING$",
 	"USING",
 	"INSTR",
-	"???,???",
+	"'",                  // 0xE4
 	"VARPTR",
 	"CSRLIN",
 	"ATTR$",
@@ -290,20 +293,32 @@ uint16_t readLineNumber( int *pos ) {
         num = num * 10 + lineBuffer[ (*pos)++ ] - '0'; // Read number
     }
     rtrim( pos );
-    if ( !num ) num = nextAutoLineNumber;
-    nextAutoLineNumber = num + autoLineNumberIncrease;
     return num;
 }
 
 void convertLineNumberList( int *pos, FILE *fout ) { // Sorszámlista
+    if ( debug ) fprintf( stdout, "Start line number list conversion\n" );
     bool inList = true;
+    if ( debug ) fprintf( stdout, "LNL=" );
+    if ( show_extra_spaces ) fputc( ' ', fout );
     while ( inList ) {
         uint16_t lineNumber = readLineNumber( pos );
-        fputc( 0x0E, fout );
-        fputc( lineNumber % 256, fout );
-        fputc( lineNumber / 256, fout );
-        inList = lineBuffer[ *pos ] == ',';
+        if ( lineNumber ) {
+            fputc( 0x0E, fout );
+            fputc( lineNumber % 256, fout );
+            fputc( lineNumber / 256, fout );
+            if ( debug ) fprintf( stdout, "%d", lineNumber );
+            if ( inList = lineBuffer[ *pos ] == ',' ) {
+                (*pos)++;
+                fputc( ',', fout );
+                if ( debug ) fprintf( stdout, "," );
+            }
+        } else {
+            inList = false;
+        }
     }
+    if ( show_extra_spaces ) fputc( ' ', fout );
+    if ( debug ) fprintf( stdout, "\n" );
 }
 
 unsigned int readBigInteger( unsigned int pos, uint64_t *num ) { // Összefüggő számsor beolvasása
@@ -578,117 +593,229 @@ void readAndWriteFixed4Double8( unsigned int *pos, FILE *fout, uint32_t egesz ) 
     }
 }
 
+// 0xE2 0x96 
+// ▁▂▃▄▅▆▇█▏▎▍▌▋▊▉┼┴┬┤├ ─│ ┌┐└┘    "
+
+unsigned int writeCharFromBuffer( unsigned int pos, FILE *fout, uint16_t lineNumber ) {
+    unsigned char c = lineBuffer[ pos++ ];
+    if ( c == 0xE2 ) {
+        unsigned char c1 = lineBuffer[ pos++ ];
+        unsigned char c2 = lineBuffer[ pos++ ];
+        if ( ( c1 == 0x94 ) ) { // Unicode first char
+            if      ( c2 == 0x82 ) fputc( 150, fout ); // '│'
+            else if ( c2 == 0x80 ) fputc( 149, fout ); // '─'
+            else if ( c2 == 0x82 ) fputc( 'X', fout ); // 
+            else if ( c2 == 0x94 ) fputc( 154, fout ); // '└'
+            else if ( c2 == 0x98 ) fputc( 155, fout ); // '┘'
+            else if ( c2 == 0x8C ) fputc( 152, fout ); // '┌'
+            else if ( c2 == 0x90 ) fputc( 153, fout ); // '┐'
+            else {
+                fputc( '?', fout );
+                fprintf( stdout, "Invalid unicode chars: 0x%02X 0x%02X 0x%02X line %d pos %d\n", c, c1, c2, lineNumber, pos-4 );
+            }
+        } else {
+            fputc( '?', fout );
+            fprintf( stdout, "Invalid unicode chars: 0x%02X 0x%02X 0x%02X line %d pos %d\n", c, c1, c2, lineNumber, pos-4 );
+        }
+    } else if ( c == 0xC2 ) {
+        unsigned char c1 = lineBuffer[ pos++ ];
+        if ( c1 == 0xB7 ) fputc( 165, fout ); // '·'
+        else {
+            fputc( '?', fout );
+            fprintf( stdout, "Invalid unicode chars: 0x%02X 0x%02X line %d pos %d\n", c, c1, lineNumber, pos-2 );
+        }
+    } else if ( ( c < 0x20 ) || ( c > 0x7E ) ) {
+        fputc( '?', fout );
+        if ( debug ) fprintf( stderr, "Invalid character: 0x%02X line %d pos %d '%s'\n", c, lineNumber, pos-1, lineBuffer + pos-1 );
+    } else {
+        fputc( c, fout );
+    }
+    return pos;
+}
+
 void convertLineBuffer( FILE *fout ) {
     int len = strlen( lineBuffer );
     unsigned int pos = 0; // A következő, még fel nem dolgozott karakterre mutat
     bool remOrDataMode = false;
     bool quoteMode = false;
+    bool variableNameMode = false;
     unsigned char token = 0;
     int8_t i8 = 0;
     int16_t i16 = 0;
     uint16_t ui16 = 0;
     uint32_t ui32 = 0;
     unsigned int dpos = 0;
+    bool firstTokenFound = false;
     if ( len ) {
         // if ( verbose ) fprintf( stdout, "Converted line length: %d\n", len );
         uint16_t lineNumber = readLineNumber( &pos );
-        // if ( verbose ) fprintf( stdout, "Converted line number: %d\n", lineNumber );
-        uint16_t RAMADDR = 0x8000; // 0x8046 - 0x10 + ftell( fout );
-        fputc( RAMADDR % 256, fout );
-        fputc( RAMADDR / 256, fout );
-        fputc( lineNumber % 256, fout );
-        fputc( lineNumber / 256, fout );
-        while( lineBuffer[pos] ) {
+        if ( !lineNumber ) {
+            if ( autoLineNumberIfNotExist ) lineNumber = nextAutoLineNumber;
+        }
+        nextAutoLineNumber = lineNumber + autoLineNumberIncrease;
+        if ( lineNumber ) {
+            if ( verbose ) fprintf( stdout, "Converted line number: %d\n", lineNumber );
+            uint16_t RAMADDR = 0x8000; // 0x8046 - 0x10 + ftell( fout );
+            fputc( RAMADDR % 256, fout );
+            fputc( RAMADDR / 256, fout );
+            fputc( lineNumber % 256, fout );
+            fputc( lineNumber / 256, fout );
+            // if ( verbose ) fprintf( stdout, "Current line: %d\n", lineNumber );
+            while( lineBuffer[pos] ) {
 // fprintf( stdout, "Pos: %d Char=0x%02X, last key='%s'\n", pos, lineBuffer[pos], last_keyword );
-            if ( quoteMode ) {
-                if ( lineBuffer[pos] < 0x20 || lineBuffer[pos] > 0x7E ) {
-                    fprintf( stderr, "Invalid character in quote mode: 0x%02X\n", lineBuffer[pos] );
-                    exit(1);
-                }
-                if ( lineBuffer[pos] == '"' ) quoteMode = false;
-                fputc( lineBuffer[pos++], fout );
-            } else if ( remOrDataMode ) {
-                if ( lineBuffer[pos] < 0x20 || lineBuffer[pos] > 0x7E ) {
-                    fprintf( stderr, "Invalid character in rem or data mode: 0x%02X\n", lineBuffer[pos] );
-                    exit(1);
-                }
-                if ( lineBuffer[pos] == ':' ) remOrDataMode = false;
-                fputc( lineBuffer[pos++], fout );
-            } else if ( lineBuffer[pos] == '"' ) {
-                quoteMode = true;
-                fputc( lineBuffer[pos++], fout );
-            } else if ( lineBuffer[pos] == '&' && lineBuffer[pos+1] == 'H' && isHex( lineBuffer[pos+2] ) ) { // Hex constant
-                fputc( 0x0C, fout );
-                pos+=2;
-                uint16_t hexVal = 0;
-                while( isHex( lineBuffer[pos] ) ) hexVal = 16 * hexVal + hexToDec( lineBuffer[pos++] );
-                fputc( hexVal%256, fout );
-                fputc( hexVal/256, fout );
-            } else if ( lineBuffer[pos] == '&' && isOct( lineBuffer[pos+1] ) ) { // Octal constant
-                fputc( 0x0B, fout );
-                pos++;
-                uint16_t octVal = 0;
-                while( isHex( lineBuffer[pos] ) ) octVal = 8 * octVal + octToDec( lineBuffer[pos++] );
-                fputc( octVal%256, fout );
-                fputc( octVal/256, fout );
-            } else if ( ( lineBuffer[ pos ] == '.' ) || ( dpos = readInteger( pos, &ui32 ) ) ) {
+                if ( lineBuffer[pos] == 0x0D ) { // Skip
+                    pos++;
+                    variableNameMode = false;
+                } else if ( quoteMode ) {
+                    if ( lineBuffer[pos] == '"' ) {
+                        quoteMode = false;
+// printf( "--- quote mode off line %d pos %d\n", lineNumber, pos );
+                        fputc( lineBuffer[pos++], fout );
+                    } else {
+                        pos = writeCharFromBuffer( pos, fout, lineNumber );
+                    }
+                } else if ( remOrDataMode ) {
+                    if ( lineBuffer[pos] == ':' ) {
+                        remOrDataMode = false;
+                        firstTokenFound = false;
+                    }
+                    pos = writeCharFromBuffer( pos, fout, lineNumber );
+                } else if ( lineBuffer[pos] == '"' ) {
+                    quoteMode = true;
+// printf( "+++ quote mode on line %d pos %d\n", lineNumber, pos );
+                    fputc( lineBuffer[pos++], fout );
+                    variableNameMode = false;
+                } else if ( lineBuffer[pos] == '&' && lineBuffer[pos+1] == 'H' && isHex( lineBuffer[pos+2] ) ) { // Hex constant
+                    fputc( 0x0C, fout );
+                    pos+=2;
+                    uint16_t hexVal = 0;
+                    while( isHex( lineBuffer[pos] ) ) hexVal = 16 * hexVal + hexToDec( lineBuffer[pos++] );
+                    fputc( hexVal%256, fout );
+                    fputc( hexVal/256, fout );
+                    variableNameMode = false;
+                } else if ( lineBuffer[pos] == '&' && isOct( lineBuffer[pos+1] ) ) { // Octal constant
+                    fputc( 0x0B, fout );
+                    pos++;
+                    uint16_t octVal = 0;
+                    while( isHex( lineBuffer[pos] ) ) octVal = 8 * octVal + octToDec( lineBuffer[pos++] );
+                    fputc( octVal%256, fout );
+                    fputc( octVal/256, fout );
+                    variableNameMode = false;
+                } else if ( ( lineBuffer[ pos ] == '.' ) || ( (!variableNameMode) && ( dpos = readInteger( pos, &ui32 ) ) ) ) {
 // fprintf( stdout, "Found integer: %d in pos %d. Length: %d, next char: '%c'\n", ui32, pos, dpos, lineBuffer[ pos+dpos ] );
-                pos += dpos;
-                switch( lineBuffer[ pos ] ) {
-                    case '!' : pos++; writeFixed4( (float)ui32, fout ); break;
-                    case '#' : pos++; writeDouble8( (float)ui32, fout ); break;
-                    case '%' : pos++; writeUInt16( fout, ui32 ); break;
-                    case 'E' : readAndWriteFixed4Double8( &pos, fout, ui32 ); break;
-                    case 'D' : readAndWriteFixed4Double8( &pos, fout, ui32 ); break;
-                    case '.' : readAndWriteFixed4Double8( &pos, fout, ui32 ); break;
-                    default: // Valódi integer
-                        if ( ui32 <= 9 ) {
-                            fputc( 0x11 + ui32, fout );
-                        } else if ( ui32 <= 255 ) {
-                            writeUInt8( fout, ui32 );
-                        } else if ( ui32 <= 65535 ) {
-                            writeUInt16( fout, ui32 );
-                        } else {
-                            fprintf( stderr, "Túl nagy integer konstans: %d\n", ui32 );
-                            exit(1);
-                        }
-                }
-            } else if ( token = searchKeyword( &pos, keywordsBase, sizeof(keywordsBase)/sizeof( keywordsBase[0] ) ) ) {
+                    pos += dpos;
+                    switch( lineBuffer[ pos ] ) {
+                        case '!' : pos++; writeFixed4( (float)ui32, fout ); break;
+                        case '#' : pos++; writeDouble8( (float)ui32, fout ); break;
+                        case '%' : pos++; writeUInt16( fout, ui32 ); break;
+                        case 'E' : readAndWriteFixed4Double8( &pos, fout, ui32 ); break;
+                        case 'D' : readAndWriteFixed4Double8( &pos, fout, ui32 ); break;
+                        case '.' : readAndWriteFixed4Double8( &pos, fout, ui32 ); break;
+                        default: // Valódi integer
+                            if ( ui32 <= 9 ) {
+                                fputc( 0x11 + ui32, fout );
+                            } else if ( ui32 <= 255 ) {
+                                writeUInt8( fout, ui32 );
+                            } else if ( ui32 <= 65535 ) {
+                                writeUInt16( fout, ui32 );
+                            } else {
+                                fprintf( stderr, "Túl nagy integer konstans: %d\n", ui32 );
+                                exit(1);
+                            }
+                    }
+                } else if ( token = searchKeyword( &pos, keywordsBase, sizeof(keywordsBase)/sizeof( keywordsBase[0] ) ) ) {
 // fprintf( stdout, "Found token: 0x%02X, '%s' New pos=%d\n", token, last_keyword, pos );
 //exit(1);
-                fputc( token, fout );
-                if ( token == 0x84 ) remOrDataMode = true; // DATA
-                if ( token == 0x8F ) remOrDataMode = true; // REM
-                if (  !strcmp( last_keyword, "THEN" )
-                   || !strcmp( last_keyword, "GOTO" )
-                   || !strcmp( last_keyword, "GOSUB" )
-                   || !strcmp( last_keyword, "RUN" )
-                   || !strcmp( last_keyword, "DELETE" )
-                   || !strcmp( last_keyword, "ELSE" )
-                   || !strcmp( last_keyword, "LIST" )
-                   || !strcmp( last_keyword, "LLIST" )
-                   || !strcmp( last_keyword, "RESTORE" ) ) {
-                    convertLineNumberList( &pos, fout ); // Sorszámlista
-                }
-            } else if ( token = searchKeyword( &pos, keywordsFF, sizeof( keywordsFF )/sizeof( keywordsFF[0] ) ) ) {
+                    if ( token == 0x84 ) remOrDataMode = true; // DATA
+                    if ( token == 0x8F ) remOrDataMode = true; // REM
+                    if ( token == 0xE4 ) {
+                        fputc( 0x3A, fout );
+                        fputc( 0x8F, fout );
+                        remOrDataMode = true; // ' == REM
+                    }
+                    if ( show_extra_spaces ) fputc( ' ', fout ); // Token prefix space 
+                    if ( token == 0xA1 ) fputc( 0x3A, fout ); // : ELSE elé
+                    fputc( token, fout );
+                    firstTokenFound = true;
+                    variableNameMode = false;
+                    if (  !strcmp( last_keyword, "THEN" )
+                       || !strcmp( last_keyword, "GOTO" )
+                       || !strcmp( last_keyword, "GOSUB" )
+                       || !strcmp( last_keyword, "RUN" )
+                       || !strcmp( last_keyword, "DELETE" )
+                       || !strcmp( last_keyword, "ELSE" )
+                       || !strcmp( last_keyword, "LIST" )
+                       || !strcmp( last_keyword, "LLIST" )
+                       || !strcmp( last_keyword, "RESTORE" ) ) {
+                        convertLineNumberList( &pos, fout ); // Sorszámlista
+                    }
+                } else if ( token = searchKeyword( &pos, keywordsFF, sizeof( keywordsFF )/sizeof( keywordsFF[0] ) ) ) {
 // fprintf( stdout, "Found token FF: 0x%02X, '%s' New pos=%d\n", token, last_keyword, pos );
-                fputc( 0xFF, fout );
-                fputc( token, fout );
+                    fputc( 0xFF, fout );
+                    fputc( token, fout );
+                    firstTokenFound = true;
+                    variableNameMode = false;
+                } else {
+                    unsigned char c = lineBuffer[pos++];
+                    if ( (c<=' ')||(c==',')||(c=='(')||(c==')')||(c==':')||(c==';')||(c=='@')||(c=='$') ) { // validStorableCharacter( lineBuffer[pos++] ) ) { // ",", ";", "(", ")", " "
+                        variableNameMode = false;
+                        if ( c >= ' ' ) fputc( c, fout );
+                    } else if ( !variableNameMode ) {
+                        variableNameMode = ( c>='A' ) && ( c<='Z' );
+                        if ( !variableNameMode ) {
+                            fprintf( stderr, "Invalid first character in varibalename: 0x%02X (%c)\n", c, c );
+                            exit(1);
+                        } else {
+                            fputc( c, fout );
+                        }
+                    } else { // variableNameMode
+                        if ( ( c>='A' ) && ( c<='Z' ) ) {
+                            fputc( c, fout );
+                        } else if ( ( c>='0' ) && ( c<='9' ) ) {
+                            fputc( c, fout );
+                        } else if ( ( c=='$' ) || ( c=='%' ) || ( c=='!' ) || ( c=='#' ) ) {
+                            fputc( c, fout );
+                            variableNameMode = true;
+                        } else {
+                            fprintf( stderr, "Invalid character in varibalename: 0x%02X (%c)\n", c, c );
+                            exit(1);
+                            }
+                        }
+                    }
+                }
+                fputc( 0, fout ); // End of basic line terminator
             } else {
-                unsigned char c = lineBuffer[pos++];
-// fprintf( stdout, "Found char: 0x%02X ('%c') at pos=%d\n", c, c, pos );
-                if ( c > ' ' ) fputc( c, fout );
+                if ( verbose ) fprintf( stdout, "Skip %d line: %s\n", pos, lineBuffer );
             }
-        }
     }
 }
 
+void convert( FILE *fin, FILE *fout );
+
+void includeNewSourceFile( unsigned char *filename, FILE *fout ) {
+    FILE *inc = fopen( filename, "r" );
+    if ( verbose ) fprintf( stdout, "Include source from %s\n", filename );
+    if ( inc ) {
+        convert( inc, fout );
+        fclose( inc );
+    } else {
+        fprintf( stderr, "Include file '%s' not found!", filename );
+        exit(1);
+    }
+}
+
+#define INCLUDE_CMD "#include "
+
 void convert( FILE *fin, FILE *fout ) {
     // Soronként beolvassuk
+    int incLen = strlen( INCLUDE_CMD );
     while ( fgets( lineBuffer, sizeof( lineBuffer ), fin) != NULL) {
         if ( lineBuffer[ strlen( lineBuffer ) - 1 ] == '\n' ) lineBuffer[ strlen( lineBuffer ) - 1 ] = 0;
-        convertLineBuffer( fout );
-        fputc( 0, fout );
+        if ( !strncmp( lineBuffer, INCLUDE_CMD, incLen ) ) {
+            includeNewSourceFile( lineBuffer + incLen , fout );
+        } else {
+            convertLineBuffer( fout );
+        }
     }
 }
 
@@ -710,8 +837,10 @@ void print_usage() {
     printf( "Convert txt file to Nec PC-8001 CMT format.\n" );
     printf( "Command line option:\n");
     printf( "-v          : set verbose mode\n" );
-    printf( "-n name     : name for CLOAD. Max 6 characters\n" );
+    printf( "-d          : enable debug info\n" );
+    printf( "-n name     : name for CLOAD. Max 6 characters. The default name is 'PC'.\n" );
     printf( "-b          : binary bas output instead of CMT (drop the first 16 byte.)\n" );
+    printf( "-a          : auto line number if not found\n" );
     printf( "-h          : prints this text\n");
     exit(1);
 }
@@ -724,7 +853,7 @@ int main( int argc, char *argv[] ) {
     bool dropCmtHeader = false;
 
     while ( !finished ) {
-        switch ( getopt ( argc, argv, "?hvbn:" ) ) {
+        switch ( getopt ( argc, argv, "?hvbdan:" ) ) {
             case -1:
             case ':':
                 finished = true;
@@ -742,6 +871,9 @@ int main( int argc, char *argv[] ) {
                 break;
             case 'v':
                 verbose = true;
+                break;
+            case 'd':
+                debug = true;
                 break;
             default:
                 break;
